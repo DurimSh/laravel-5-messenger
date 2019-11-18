@@ -2,6 +2,7 @@
 
 namespace Lexx\ChatMessenger\Models;
 
+use App\Models\Company;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model as Eloquent;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -19,20 +20,6 @@ class Thread extends Eloquent
      * @var string
      */
     protected $table = 'threads';
-
-    /**
-     * The attributes that can be set with Mass Assignment.
-     *
-     * @var array
-     */
-    protected $fillable = ['subject', 'slug', 'start_date', 'end_date', 'max_participants', 'avatar'];
-
-    /**
-     * The attributes that should be mutated to dates.
-     *
-     * @var array
-     */
-    protected $dates = ['deleted_at'];
 
     /**
     * Internal cache for creator.
@@ -122,30 +109,19 @@ class Thread extends Eloquent
         return static::latest('updated_at');
     }
 
-    /**
-     * Returns all threads by subject.
-     *
-     * @param string $subject
-     * @return \Illuminate\Database\Query\Builder|static
-     */
-    public static function getBySubject($subject)
-    {
-        return static::where('subject', 'like', $subject)->get();
-    }
-
-    /**
-     * Returns an array of user ids that are associated with the thread.
-     * Deleted participants from a thread will not be returned
-     *
-     * @param null $userId
-     *
-     * @return array
-     */
-    public function participantsUserIds($userId = null)
-    {
-        $users = $this->participants()->select('user_id')->get()->map(function ($participant) {
-            return $participant->user_id;
-        });
+	/**
+	 * Returns an array of user ids that are associated with the thread.
+	 * Deleted participants from a thread will not be returned
+	 *
+	 * @param null $userId
+	 *
+	 * @return array
+	 */
+	public function participantsUserIds($userId = null)
+	{
+		$users = $this->participants()->select('user_id')->get()->map(function ($participant) {
+			return $participant->user_id;
+		});
 
         if ($userId) {
             $users->push($userId);
@@ -193,18 +169,37 @@ class Thread extends Eloquent
             ->select($threadsTable . '.*');
     }
 
-    /**
-     * Returns threads with new messages that the user is associated with.
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query
-     * @param int $userId
-     *
-     * @return \Illuminate\Database\Eloquent\Builder
-     */
-    public function scopeForUserWithNewMessages(Builder $query, $userId)
-    {
-        $participantTable = Models::table('participants');
-        $threadsTable = Models::table('threads');
+	/**
+	 * Returns threads that the user is associated with.
+	 *
+	 * @param \Illuminate\Database\Eloquent\Builder $query
+	 * @param int $companyId
+	 *
+	 * @return \Illuminate\Database\Eloquent\Builder
+	 */
+	public function scopeForCompany(Builder $query, $companyId)
+	{
+		$participantsTable = Models::table('participants');
+		$threadsTable = Models::table('threads');
+
+		return $query->join($participantsTable, $this->getQualifiedKeyName(), '=', $participantsTable . '.thread_id')
+			->where($participantsTable . '.company_id', $companyId)
+			->where($participantsTable . '.deleted_at', null)
+			->select($threadsTable . '.*');
+	}
+
+	/**
+	 * Returns threads with new messages that the user is associated with.
+	 *
+	 * @param \Illuminate\Database\Eloquent\Builder $query
+	 * @param int $userId
+	 *
+	 * @return \Illuminate\Database\Eloquent\Builder
+	 */
+	public function scopeForUserWithNewMessages(Builder $query, $userId)
+	{
+		$participantTable = Models::table('participants');
+		$threadsTable = Models::table('threads');
 
         return $query->join($participantTable, $this->getQualifiedKeyName(), '=', $participantTable . '.thread_id')
             ->where($participantTable . '.user_id', $userId)
@@ -234,38 +229,28 @@ class Thread extends Eloquent
         });
     }
 
-    /**
-     * Add users to thread as participants.
-     *
-     * @param array|mixed $userId
-     *
-     * @return boolean
-     */
-    public function addParticipant($userId)
-    {
-        $userIds = is_array($userId) ? $userId : (array) func_get_args();
+	/**
+	 * Add users to thread as participants.
+	 *
+	 * @param array|mixed $companyId
+	 *
+	 * @return boolean
+	 */
+	public function addParticipant($companyId)
+	{
+		$companyIds = is_array($companyId) ? $companyId : (array)func_get_args();
 
-        return collect($userIds)->each(function ($userId) {
-            Models::participant()->firstOrCreate([
-                'user_id' => $userId,
-                'thread_id' => $this->id,
-            ]);
-        });
-    }
+		return collect($companyIds)->each(function ($companyId) {
+			$company = Company::where('id', $companyId)->first();
+			$user = $company->user()->first()->id;
+			Models::participant()->firstOrCreate([
+				'company_id' => $companyId,
+				'user_id' => $user,
+				'thread_id' => $this->id,
+			]);
+		});
+	}
 
-    /**
-     * Remove participants from thread.
-     *
-     * @param array|mixed $userId
-     *
-     * @return boolean
-     */
-    public function removeParticipant($userId)
-    {
-        $userIds = is_array($userId) ? $userId : (array) func_get_args();
-
-        return Models::participant()->where('thread_id', $this->id)->whereIn('user_id', $userIds)->delete();
-    }
 
     /**
      * Mark a thread as read for a user.
@@ -462,73 +447,73 @@ class Thread extends Eloquent
         return $this->max_participants;
     }
 
-    /**
-     * Checks if the max number of participants in a thread has been reached.
-     *
-     * @return boolean
-     */
-    public function hasMaxParticipants()
-    {
-        $participants = $this->participants();
-        if ($participants->count() > $this->max_participants) {
-            // max number of participants reached
-            return true;
-        }
-        return false;
-    }
-    
-    /**
-     * star/favourite a thread
-     *
-     * @param null $userId
-     *
-     * @return mixed
-     */
-    public function star($userId = null)
-    {
-        if(! $userId)
-            $userId = Auth::id();
-        
-        return $this->participants()
-            ->where('user_id', $userId)
-            ->firstOrFail()
-            ->update(['starred' => true]);
-    }
-    
-    /**
-     * unstar/unfavourite a thread
-     *
-     * @param null $userId
-     *
-     * @return mixed
-     */
-    public function unstar($userId = null)
-    {
-        if(! $userId)
-            $userId = Auth::id();
-        
-        return $this->participants()
-            ->where('user_id', $userId)
-            ->firstOrFail()
-            ->update(['starred' => false]);
-    }
-    
-    /**
-     * check if the thread has been starred
-     *
-     * @param null $userId
-     *
-     * @return bool
-     */
-    public function getIsStarredAttribute($userId = null)
-    {
-        if(! $userId)
-            $userId = Auth::id();
-        
-        return !! $this->participants()
-            ->where('user_id', $userId)
-            ->firstOrFail()
-            ->starred;
-    }
-    
+	/**
+	 * Checks if the max number of participants in a thread has been reached.
+	 *
+	 * @return boolean
+	 */
+	public function hasMaxParticipants()
+	{
+		$participants = $this->participants();
+		if ($participants->count() > $this->max_participants) {
+			// max number of participants reached
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * star/favourite a thread
+	 *
+	 * @param null $userId
+	 *
+	 * @return mixed
+	 */
+	public function star($userId = null)
+	{
+		if (!$userId)
+			$userId = Auth::id();
+
+		return $this->participants()
+			->where('user_id', $userId)
+			->firstOrFail()
+			->update(['starred' => true]);
+	}
+
+	/**
+	 * unstar/unfavourite a thread
+	 *
+	 * @param null $userId
+	 *
+	 * @return mixed
+	 */
+	public function unstar($userId = null)
+	{
+		if (!$userId)
+			$userId = Auth::id();
+
+		return $this->participants()
+			->where('user_id', $userId)
+			->firstOrFail()
+			->update(['starred' => false]);
+	}
+
+	/**
+	 * check if the thread has been starred
+	 *
+	 * @param null $userId
+	 *
+	 * @return bool
+	 */
+	public function getIsStarredAttribute($userId = null)
+	{
+		if (!$userId)
+			$userId = Auth::id();
+
+		return !!$this->participants()
+			->where('user_id', $userId)
+			->firstOrFail()
+			->starred;
+	}
+
 }
