@@ -180,7 +180,7 @@ class Thread extends Eloquent
 	}
 
 	/**
-	 * Returns an array of user ids that are associated with the thread.
+	 * Returns an array of company ids that are associated with the thread.
 	 * Deleted participants from a thread will not be returned
 	 *
 	 * @param null $companyId
@@ -211,6 +211,27 @@ class Thread extends Eloquent
 	public function participantsUserIds($userId = null)
 	{
 		$users = $this->participants()->select('user_id')->whereNull('company_id')->get()->map(function ($participant) {
+			return $participant->user_id;
+		});
+
+		if ($userId) {
+			$users->push($userId);
+		}
+
+		return $users->toArray();
+	}
+
+	/**
+	 * Returns an array of all participants ids that are associated with the thread.
+	 * Deleted participants from a thread will not be returned
+	 *
+	 * @param null $userId
+	 *
+	 * @return array
+	 */
+	public function allParticipants($userId = null)
+	{
+		$users = $this->participants()->select('user_id')->get()->map(function ($participant) {
 			return $participant->user_id;
 		});
 
