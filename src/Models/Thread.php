@@ -23,6 +23,8 @@ class Thread extends Eloquent
 	 */
 	protected $table = 'threads';
 
+	protected $fillable = ['company_id'];
+
 	protected $appends = ['company_name', 'company_logo', 'person_name', 'person_avatar', 'last_message'];
 
 	/**
