@@ -96,7 +96,7 @@ class Message extends Eloquent
 			if (!empty($user)) {
 				$avatar = $user->avatar();
 				if ($avatar->count() > 0) {
-					return $avatar->link;
+					return $avatar->first()->link;
 				}
 			}
 		}
